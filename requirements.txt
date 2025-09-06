@@ -1,0 +1,23 @@
+# Requirements for OceanScope Project
+# Install with: pip install -r requirements.txt
+
+# Core dependencies
+streamlit>=1.28.0
+xarray>=2023.1.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+numpy>=1.24.0
+
+# Environment management
+python-dotenv>=1.0.0
+
+# AI/ML dependencies
+google-generativeai>=0.3.0
+
+# Scientific computing
+netcdf4>=1.6.0
+scipy>=1.10.0
+
+# Optional for enhanced functionality
+plotly>=5.15.0  # For interactive plots
+seaborn>=0.12.0  # For statistical visualization
