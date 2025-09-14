@@ -3,8 +3,33 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import pandas as pd
 from utils.data_loader import ArgoDataLoader
+from utils.auth_decorators import AuthMiddleware
+
+# Configure page
+st.set_page_config(
+    page_title="Explore Data - OceanScope",
+    page_icon="📊",
+    layout="wide"
+)
+
+# Set up authentication for this protected page
+AuthMiddleware.setup_page_auth(require_auth=True, page_name="explore_data.py", show_header=True)
 
 st.title("📊 Explore Argo Data")
+
+# Sidebar navigation
+with st.sidebar:
+    st.subheader("🧭 Navigation")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🤖 Chat", use_container_width=True):
+            st.switch_page("pages/chatbot.py")
+    with col2:
+        if st.button("🏠 Home", use_container_width=True):
+            st.switch_page("pages/landing.py")
+    
+    st.markdown("---")
 
 # Initialize data loader
 @st.cache_resource

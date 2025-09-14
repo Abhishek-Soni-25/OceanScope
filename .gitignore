@@ -6,6 +6,8 @@ __pycache__/
 # C extensions
 *.so
 
+app_data.db
+
 # Distribution / packaging
 .Python
 build/
@@ -87,6 +89,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.kiro/
 
 # Spyder project settings
 .spyderproject
@@ -124,3 +127,46 @@ Thumbs.db
 *.nc.tmp
 logs/
 temp/
+
+# Test and verification files (not needed for app to run)
+test_*.py
+verify_*.py
+*_test.py
+*_verification.py
+*_demo.py
+
+# Implementation summaries and documentation
+*_implementation_summary.md
+*_integration_summary.md
+final_integration_summary.md
+auth_integration_summary.md
+message_persistence_implementation_summary.md
+user_profile_logout_implementation_summary.md
+error_handling_implementation_summary.md
+
+# Test directories
+tests/
+test/
+
+# Kiro IDE specs and tasks (development only)
+.kiro/specs/
+.kiro/tasks/
+
+# Example and utility files not needed for production
+utils/auth_examples.py
+utils/error_config.py
+utils/error_recovery.py
+
+# Specific test and verification files
+verify_chatbot_structure.py
+test_complete_user_journey.py
+verify_final_integration.py
+test_final_integration.py
+error_handling_demo.py
+verify_user_profile_implementation.py
+test_user_profile_logout.py
+verify_chatbot_imports.py
+test_message_persistence_comprehensive.py
+verify_message_persistence.py
+test_chatbot_integration.py
+test_auth_integration.py
