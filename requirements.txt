@@ -24,3 +24,11 @@ scipy>=1.10.0
 # Optional for enhanced functionality
 plotly>=5.15.0  # For interactive plots
 seaborn>=0.12.0  # For statistical visualization
+
+# Web scraping dependencies
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Database dependencies
+psycopg2-binary=2.9.10
+sqlalchemy=2.0.43
