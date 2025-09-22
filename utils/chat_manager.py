@@ -1,10 +1,14 @@
 """
 Chat Manager for handling chat sessions and message persistence.
+Updated to use PostgreSQL instead of SQLite.
 """
 import logging
+import asyncio
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
-from .database_manager import DatabaseManager, DatabaseError
+import uuid
+
+from database.postgresql_manager import get_database_manager, DatabaseError
 
 
 class ChatError(Exception):
@@ -13,11 +17,10 @@ class ChatError(Exception):
 
 
 class ChatManager:
-    """Manages chat sessions and messages with database persistence."""
+    """Manages chat sessions and messages with PostgreSQL persistence."""
     
-    def __init__(self, db_path: str = "app_data.db"):
-        """Initialize chat manager with database connection."""
-        self.db_manager = DatabaseManager(db_path)
+    def __init__(self):
+        """Initialize chat manager."""
         self.logger = logging.getLogger(__name__)
         if not self.logger.handlers:
             handler = logging.StreamHandler()
@@ -26,25 +29,30 @@ class ChatManager:
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
     
-    def create_chat_session(self, user_id: int, session_name: str = None) -> Tuple[Optional[int], str]:
+    async def create_chat_session(
+        self, 
+        user_id: str, 
+        session_name: str = None,
+        description: str = None
+    ) -> Tuple[Optional[str], str]:
         """
         Create a new chat session for a user with error handling.
         
         Args:
             user_id: ID of the user creating the session
             session_name: Optional name for the session (auto-generated if None)
+            description: Optional description for the session
             
         Returns:
             Tuple of (session_id, message)
         """
         try:
             # Input validation
-            if not isinstance(user_id, int) or user_id <= 0:
+            if not user_id or not isinstance(user_id, str):
                 return None, "Invalid user ID"
             
-            # Check database availability
-            if not self.db_manager.check_availability():
-                return None, "Chat service temporarily unavailable. Please try again later."
+            # Get database manager
+            db_manager = await get_database_manager()
             
             if session_name is None:
                 # Auto-generate session name with timestamp
@@ -55,15 +63,15 @@ class ChatManager:
             if session_name and len(session_name.strip()) > 100:
                 session_name = session_name.strip()[:100]
             
-            session_id = self.db_manager.execute_query(
-                """INSERT INTO chat_sessions (user_id, session_name, created_at, updated_at) 
-                   VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
-                (user_id, session_name.strip() if session_name else None)
+            session_id = await db_manager.create_chat_session(
+                user_id=user_id,
+                session_name=session_name.strip() if session_name else None,
+                description=description
             )
             
             if session_id:
                 self.logger.info(f"Chat session created successfully: {session_id} for user {user_id}")
-                return session_id, "New chat session created successfully!"
+                return str(session_id), "New chat session created successfully!"
             else:
                 return None, "Failed to create chat session. Please try again."
                 
@@ -74,7 +82,7 @@ class ChatManager:
             self.logger.error(f"Unexpected error creating chat session: {e}")
             return None, "An unexpected error occurred. Please try again."
     
-    def get_user_chat_sessions(self, user_id: int) -> Tuple[List[Dict], str]:
+    async def get_user_chat_sessions(self, user_id: str) -> Tuple[List[Dict], str]:
         """
         Get all chat sessions for a user, ordered by most recent first.
         
@@ -86,26 +94,22 @@ class ChatManager:
         """
         try:
             # Input validation
-            if not isinstance(user_id, int) or user_id <= 0:
+            if not user_id or not isinstance(user_id, str):
                 return [], "Invalid user ID"
             
-            # Check database availability
-            if not self.db_manager.check_availability():
-                return [], "Chat history temporarily unavailable. Please try again later."
+            # Get database manager
+            db_manager = await get_database_manager()
             
-            sessions = self.db_manager.execute_query(
-                """SELECT cs.*, 
-                          COUNT(cm.id) as message_count,
-                          MAX(cm.timestamp) as last_message_time
-                   FROM chat_sessions cs
-                   LEFT JOIN chat_messages cm ON cs.id = cm.session_id
-                   WHERE cs.user_id = ?
-                   GROUP BY cs.id
-                   ORDER BY cs.updated_at DESC""",
-                (user_id,)
-            )
+            sessions = await db_manager.get_user_chat_sessions(user_id)
             
-            session_list = [dict(session) for session in sessions]
+            # Convert UUIDs to strings for JSON serialization
+            session_list = []
+            for session in sessions:
+                session_dict = dict(session)
+                session_dict['id'] = str(session_dict['id'])
+                session_dict['user_id'] = str(session_dict['user_id'])
+                session_list.append(session_dict)
+            
             self.logger.debug(f"Retrieved {len(session_list)} chat sessions for user {user_id}")
             
             if session_list:
@@ -120,7 +124,11 @@ class ChatManager:
             self.logger.error(f"Unexpected error retrieving chat sessions: {e}")
             return [], "An unexpected error occurred loading chat history."
     
-    def get_session_messages(self, session_id: int, user_id: int = None) -> Tuple[List[Dict], str]:
+    async def get_session_messages(
+        self, 
+        session_id: str, 
+        user_id: str = None
+    ) -> Tuple[List[Dict], str]:
         """
         Get all messages for a specific chat session with error handling.
         
@@ -133,34 +141,22 @@ class ChatManager:
         """
         try:
             # Input validation
-            if not isinstance(session_id, int) or session_id <= 0:
+            if not session_id or not isinstance(session_id, str):
                 return [], "Invalid session ID"
             
-            # Check database availability
-            if not self.db_manager.check_availability():
-                return [], "Chat messages temporarily unavailable. Please try again later."
+            # Get database manager
+            db_manager = await get_database_manager()
             
-            # If user_id is provided, verify the session belongs to the user
-            if user_id is not None:
-                try:
-                    session_check = self.db_manager.execute_query(
-                        "SELECT user_id FROM chat_sessions WHERE id = ?",
-                        (session_id,)
-                    )
-                    if not session_check or session_check[0]['user_id'] != user_id:
-                        return [], "Unauthorized access to chat session"
-                except DatabaseError as e:
-                    self.logger.error(f"Error verifying session ownership: {e}")
-                    return [], "Unable to verify session access. Please try again."
+            messages = await db_manager.get_chat_messages(session_id, user_id)
             
-            messages = self.db_manager.execute_query(
-                """SELECT * FROM chat_messages 
-                   WHERE session_id = ? 
-                   ORDER BY timestamp ASC""",
-                (session_id,)
-            )
+            # Convert UUIDs to strings for JSON serialization
+            message_list = []
+            for message in messages:
+                message_dict = dict(message)
+                message_dict['id'] = str(message_dict['id'])
+                message_dict['session_id'] = str(message_dict['session_id'])
+                message_list.append(message_dict)
             
-            message_list = [dict(message) for message in messages]
             self.logger.debug(f"Retrieved {len(message_list)} messages for session {session_id}")
             
             if message_list:
@@ -175,7 +171,14 @@ class ChatManager:
             self.logger.error(f"Unexpected error retrieving messages: {e}")
             return [], "An unexpected error occurred loading messages."
     
-    def add_message(self, session_id: int, message_type: str, content: str, user_id: int = None) -> Tuple[bool, str]:
+    async def add_message(
+        self, 
+        session_id: str, 
+        message_type: str, 
+        content: str, 
+        user_id: str = None,
+        metadata: Dict = None
+    ) -> Tuple[bool, str]:
         """
         Add a message to a chat session with comprehensive error handling.
         
@@ -184,13 +187,14 @@ class ChatManager:
             message_type: Type of message ('user' or 'assistant')
             content: Message content
             user_id: Optional user ID for security check
+            metadata: Optional metadata for the message
             
         Returns:
             Tuple of (success, message)
         """
         try:
             # Input validation
-            if not isinstance(session_id, int) or session_id <= 0:
+            if not session_id or not isinstance(session_id, str):
                 return False, "Invalid session ID"
             
             if message_type not in ['user', 'assistant']:
@@ -203,42 +207,24 @@ class ChatManager:
             if len(content) > 10000:  # 10KB limit
                 content = content[:10000] + "... [message truncated]"
             
-            # Check database availability
-            if not self.db_manager.check_availability():
-                return False, "Chat service temporarily unavailable. Please try again later."
-            
-            # If user_id is provided, verify the session belongs to the user
-            if user_id is not None:
-                try:
-                    session_check = self.db_manager.execute_query(
-                        "SELECT user_id FROM chat_sessions WHERE id = ?",
-                        (session_id,)
-                    )
-                    if not session_check or session_check[0]['user_id'] != user_id:
-                        return False, "Unauthorized access to chat session"
-                except DatabaseError as e:
-                    self.logger.error(f"Error verifying session ownership: {e}")
-                    return False, "Unable to verify session access. Please try again."
+            # Get database manager
+            db_manager = await get_database_manager()
             
             # Add the message
             try:
-                message_id = self.db_manager.execute_query(
-                    """INSERT INTO chat_messages (session_id, message_type, content, timestamp) 
-                       VALUES (?, ?, ?, CURRENT_TIMESTAMP)""",
-                    (session_id, message_type, content.strip())
+                message_id = await db_manager.add_chat_message(
+                    session_id=session_id,
+                    message_type=message_type,
+                    content=content.strip(),
+                    user_id=user_id,
+                    metadata=metadata
                 )
                 
-                if not message_id:
+                if message_id:
+                    self.logger.debug(f"Message added successfully to session {session_id}")
+                    return True, "Message saved successfully"
+                else:
                     return False, "Failed to save message. Please try again."
-                
-                # Update the session's updated_at timestamp
-                self.db_manager.execute_query(
-                    "UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (session_id,)
-                )
-                
-                self.logger.debug(f"Message added successfully to session {session_id}")
-                return True, "Message saved successfully"
                 
             except DatabaseError as e:
                 self.logger.error(f"Database error adding message: {e}")
@@ -248,7 +234,12 @@ class ChatManager:
             self.logger.error(f"Unexpected error adding message: {e}")
             return False, "An unexpected error occurred. Please try again."
     
-    def update_session_name(self, session_id: int, new_name: str, user_id: int = None) -> bool:
+    async def update_session_name(
+        self, 
+        session_id: str, 
+        new_name: str, 
+        user_id: str = None
+    ) -> bool:
         """
         Update the name of a chat session.
         
@@ -260,27 +251,35 @@ class ChatManager:
         Returns:
             True if session name was updated successfully, False otherwise
         """
-        # If user_id is provided, verify the session belongs to the user
-        if user_id is not None:
-            session_check = self.db_manager.execute_query(
-                "SELECT user_id FROM chat_sessions WHERE id = ?",
-                (session_id,)
-            )
-            if not session_check or session_check[0]['user_id'] != user_id:
-                return False
-        
         try:
-            rows_affected = self.db_manager.execute_query(
+            if not session_id or not new_name:
+                return False
+            
+            # Get database manager
+            db_manager = await get_database_manager()
+            
+            # Verify session belongs to user if user_id provided
+            if user_id:
+                session_info = await db_manager.get_session_info(session_id, user_id)
+                if not session_info:
+                    return False
+            
+            # Update session name
+            await db_manager.execute_query(
                 """UPDATE chat_sessions 
-                   SET session_name = ?, updated_at = CURRENT_TIMESTAMP 
-                   WHERE id = ?""",
-                (new_name, session_id)
+                   SET session_name = $1, updated_at = CURRENT_TIMESTAMP 
+                   WHERE id = $2""",
+                (new_name.strip(), session_id)
             )
-            return rows_affected > 0
-        except Exception:
+            
+            self.logger.info(f"Session name updated: {session_id}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error updating session name: {e}")
             return False
     
-    def delete_chat_session(self, session_id: int, user_id: int = None) -> bool:
+    async def delete_chat_session(self, session_id: str, user_id: str = None) -> bool:
         """
         Delete a chat session and all its messages.
         
@@ -291,33 +290,33 @@ class ChatManager:
         Returns:
             True if session was deleted successfully, False otherwise
         """
-        # If user_id is provided, verify the session belongs to the user
-        if user_id is not None:
-            session_check = self.db_manager.execute_query(
-                "SELECT user_id FROM chat_sessions WHERE id = ?",
-                (session_id,)
-            )
-            if not session_check or session_check[0]['user_id'] != user_id:
-                return False
-        
         try:
-            # Delete all messages in the session first (due to foreign key constraint)
-            self.db_manager.execute_query(
-                "DELETE FROM chat_messages WHERE session_id = ?",
+            if not session_id:
+                return False
+            
+            # Get database manager
+            db_manager = await get_database_manager()
+            
+            # Verify session belongs to user if user_id provided
+            if user_id:
+                session_info = await db_manager.get_session_info(session_id, user_id)
+                if not session_info:
+                    return False
+            
+            # Mark session as inactive instead of deleting (soft delete)
+            await db_manager.execute_query(
+                "UPDATE chat_sessions SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1",
                 (session_id,)
             )
             
-            # Delete the session
-            rows_affected = self.db_manager.execute_query(
-                "DELETE FROM chat_sessions WHERE id = ?",
-                (session_id,)
-            )
+            self.logger.info(f"Chat session deleted (soft): {session_id}")
+            return True
             
-            return rows_affected > 0
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Error deleting chat session: {e}")
             return False
     
-    def get_session_info(self, session_id: int, user_id: int = None) -> Optional[Dict]:
+    async def get_session_info(self, session_id: str, user_id: str = None) -> Optional[Dict]:
         """
         Get information about a specific chat session.
         
@@ -328,29 +327,29 @@ class ChatManager:
         Returns:
             Dictionary with session information or None if not found/unauthorized
         """
-        # If user_id is provided, verify the session belongs to the user
-        if user_id is not None:
-            session_info = self.db_manager.execute_query(
-                """SELECT cs.*, COUNT(cm.id) as message_count
-                   FROM chat_sessions cs
-                   LEFT JOIN chat_messages cm ON cs.id = cm.session_id
-                   WHERE cs.id = ? AND cs.user_id = ?
-                   GROUP BY cs.id""",
-                (session_id, user_id)
-            )
-        else:
-            session_info = self.db_manager.execute_query(
-                """SELECT cs.*, COUNT(cm.id) as message_count
-                   FROM chat_sessions cs
-                   LEFT JOIN chat_messages cm ON cs.id = cm.session_id
-                   WHERE cs.id = ?
-                   GROUP BY cs.id""",
-                (session_id,)
-            )
-        
-        return dict(session_info[0]) if session_info else None
+        try:
+            if not session_id:
+                return None
+            
+            # Get database manager
+            db_manager = await get_database_manager()
+            
+            session_info = await db_manager.get_session_info(session_id, user_id)
+            
+            if session_info:
+                # Convert UUIDs to strings for JSON serialization
+                session_dict = dict(session_info)
+                session_dict['id'] = str(session_dict['id'])
+                session_dict['user_id'] = str(session_dict['user_id'])
+                return session_dict
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error getting session info: {e}")
+            return None
     
-    def get_user_message_count(self, user_id: int) -> int:
+    async def get_user_message_count(self, user_id: str) -> int:
         """
         Get total number of messages for a user across all sessions.
         
@@ -360,12 +359,113 @@ class ChatManager:
         Returns:
             Total message count
         """
-        result = self.db_manager.execute_query(
-            """SELECT COUNT(cm.id) as total_messages
-               FROM chat_messages cm
-               JOIN chat_sessions cs ON cm.session_id = cs.id
-               WHERE cs.user_id = ?""",
-            (user_id,)
-        )
+        try:
+            if not user_id:
+                return 0
+            
+            # Get database manager
+            db_manager = await get_database_manager()
+            
+            result = await db_manager.execute_query(
+                """SELECT COUNT(cm.id) as total_messages
+                   FROM chat_messages cm
+                   JOIN chat_sessions cs ON cm.session_id = cs.id
+                   WHERE cs.user_id = $1 AND cs.is_active = true""",
+                (user_id,),
+                fetch_one=True
+            )
+            
+            return result['total_messages'] if result else 0
+            
+        except Exception as e:
+            self.logger.error(f"Error getting user message count: {e}")
+            return 0
+    
+    async def search_messages(
+        self, 
+        user_id: str, 
+        query: str, 
+        session_id: str = None,
+        limit: int = 50
+    ) -> List[Dict]:
+        """
+        Search messages across user's chat sessions.
         
-        return result[0]['total_messages'] if result else 0
+        Args:
+            user_id: ID of the user
+            query: Search query
+            session_id: Optional specific session to search
+            limit: Maximum number of results
+            
+        Returns:
+            List of matching messages
+        """
+        try:
+            if not user_id or not query:
+                return []
+            
+            # Get database manager
+            db_manager = await get_database_manager()
+            
+            if session_id:
+                # Search in specific session
+                result = await db_manager.execute_query(
+                    """SELECT cm.*, cs.session_name
+                       FROM chat_messages cm
+                       JOIN chat_sessions cs ON cm.session_id = cs.id
+                       WHERE cs.user_id = $1 AND cs.id = $2 AND cs.is_active = true
+                       AND (cm.content ILIKE $3 OR cm.content ILIKE $4)
+                       ORDER BY cm.created_at DESC
+                       LIMIT $5""",
+                    (user_id, session_id, f"%{query}%", f"%{query.lower()}%", limit),
+                    fetch=True
+                )
+            else:
+                # Search across all user sessions
+                result = await db_manager.execute_query(
+                    """SELECT cm.*, cs.session_name
+                       FROM chat_messages cm
+                       JOIN chat_sessions cs ON cm.session_id = cs.id
+                       WHERE cs.user_id = $1 AND cs.is_active = true
+                       AND (cm.content ILIKE $2 OR cm.content ILIKE $3)
+                       ORDER BY cm.created_at DESC
+                       LIMIT $4""",
+                    (user_id, f"%{query}%", f"%{query.lower()}%", limit),
+                    fetch=True
+                )
+            
+            # Convert UUIDs to strings for JSON serialization
+            messages = []
+            for message in result:
+                message_dict = dict(message)
+                message_dict['id'] = str(message_dict['id'])
+                message_dict['session_id'] = str(message_dict['session_id'])
+                messages.append(message_dict)
+            
+            return messages
+            
+        except Exception as e:
+            self.logger.error(f"Error searching messages: {e}")
+            return []
+    
+    async def cleanup_old_sessions(self, days_old: int = 30) -> int:
+        """
+        Clean up old inactive chat sessions.
+        
+        Args:
+            days_old: Number of days old sessions should be to be cleaned up
+            
+        Returns:
+            Number of sessions cleaned up
+        """
+        try:
+            # Get database manager
+            db_manager = await get_database_manager()
+            
+            deleted_count = await db_manager.cleanup_old_sessions(days_old)
+            self.logger.info(f"Cleaned up {deleted_count} old sessions")
+            return deleted_count
+            
+        except Exception as e:
+            self.logger.error(f"Error cleaning up old sessions: {e}")
+            return 0

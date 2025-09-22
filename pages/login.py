@@ -1,6 +1,7 @@
 import streamlit as st
 import time
 from utils.auth_manager import AuthManager
+from utils.async_wrapper import run_auth_operation
 from utils.ui_feedback import UIFeedback, LoadingStates, ErrorMessages, SuccessMessages
 
 # Configure page
@@ -183,7 +184,10 @@ with st.container():
                 try:
                     # Show loading state with proper feedback
                     with UIFeedback.loading_state(LoadingStates.AUTH_LOGIN):
-                        success, message = auth_manager.login_user_with_session(username.strip(), password)
+                        success, message = run_auth_operation(
+                            lambda auth_mgr, u, p: auth_mgr.login_user_with_session(u, p),
+                            username.strip(), password
+                        )
                     
                     if success:
                         st.session_state.login_success = True

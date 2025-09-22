@@ -6,6 +6,7 @@ from utils.query_engine import OceanDataQueryEngine
 from utils.data_loader import ArgoDataLoader
 from utils.auth_decorators import AuthMiddleware, require_auth
 from utils.chat_manager import ChatManager
+from utils.async_wrapper import run_chat_operation
 from utils.session_manager import SessionManager
 from utils.ui_feedback import UIFeedback, LoadingStates, ErrorMessages, SuccessMessages
 from datetime import datetime
@@ -108,7 +109,10 @@ with st.sidebar:
         if user_id:
             try:
                 with UIFeedback.loading_state(LoadingStates.CHAT_CREATING):
-                    new_session_id, message = chat_manager.create_chat_session(user_id)
+                    new_session_id, message = run_chat_operation(
+                        lambda chat_mgr, uid: chat_mgr.create_chat_session(uid),
+                        user_id
+                    )
                 
                 if new_session_id:
                     st.session_state.current_chat_session_id = new_session_id
@@ -124,7 +128,10 @@ with st.sidebar:
     st.markdown("### 📜 Chat History")
     if user_id:
         try:
-            chat_sessions, sessions_message = chat_manager.get_user_chat_sessions(user_id)
+            chat_sessions, sessions_message = run_chat_operation(
+                lambda chat_mgr, uid: chat_mgr.get_user_chat_sessions(uid),
+                user_id
+            )
             
             if chat_sessions:
                 # Show recent chats (limit to 10 for better UI)
@@ -153,7 +160,10 @@ with st.sidebar:
                         # Load selected chat session
                         st.session_state.current_chat_session_id = session['id']
                         try:
-                            messages, load_message = chat_manager.get_session_messages(session['id'], user_id)
+                            messages, load_message = run_chat_operation(
+                                lambda chat_mgr, sid, uid: chat_mgr.get_session_messages(sid, uid),
+                                session['id'], user_id
+                            )
                             st.session_state.chat_messages = messages
                             st.rerun()
                         except Exception as e:
@@ -210,7 +220,10 @@ if (st.session_state.current_chat_session_id and
     not st.session_state.chat_messages):
     try:
         # Load messages if session exists but no messages in session state
-        messages, load_message = chat_manager.get_session_messages(st.session_state.current_chat_session_id, user_id)
+        messages, load_message = run_chat_operation(
+            lambda chat_mgr, sid, uid: chat_mgr.get_session_messages(sid, uid),
+            st.session_state.current_chat_session_id, user_id
+        )
         st.session_state.chat_messages = messages
         if messages:
             st.info(f"Loaded {len(messages)} previous messages from this chat session.")
@@ -219,7 +232,10 @@ if (st.session_state.current_chat_session_id and
     
     # Display current chat session info
     if st.session_state.current_chat_session_id:
-        session_info = chat_manager.get_session_info(st.session_state.current_chat_session_id, user_id)
+        session_info = run_chat_operation(
+            lambda chat_mgr, sid, uid: chat_mgr.get_session_info(sid, uid),
+            st.session_state.current_chat_session_id, user_id
+        )
         if session_info:
             st.info(f"💬 Current Chat: {session_info['session_name']} • {session_info['message_count']} messages")
     else:
@@ -305,7 +321,10 @@ if (st.session_state.current_chat_session_id and
         if not st.session_state.current_chat_session_id and user_id:
             try:
                 with UIFeedback.loading_state(LoadingStates.CHAT_CREATING):
-                    session_id, create_message = chat_manager.create_chat_session(user_id)
+                    session_id, create_message = run_chat_operation(
+                        lambda chat_mgr, uid: chat_mgr.create_chat_session(uid),
+                        user_id
+                    )
                 
                 if session_id:
                     st.session_state.current_chat_session_id = session_id
@@ -322,11 +341,9 @@ if (st.session_state.current_chat_session_id and
         if st.session_state.current_chat_session_id:
             try:
                 with UIFeedback.loading_state(LoadingStates.CHAT_SAVING):
-                    success, save_message = chat_manager.add_message(
-                        st.session_state.current_chat_session_id, 
-                        'user', 
-                        query, 
-                        user_id
+                    success, save_message = run_chat_operation(
+                        lambda chat_mgr, sid, mtype, content, uid: chat_mgr.add_message(sid, mtype, content, uid),
+                        st.session_state.current_chat_session_id, 'user', query, user_id
                     )
                 
                 if success:
@@ -362,11 +379,9 @@ if (st.session_state.current_chat_session_id and
                     # Save assistant response to database and session state
                     if st.session_state.current_chat_session_id:
                         try:
-                            success, save_message = chat_manager.add_message(
-                                st.session_state.current_chat_session_id, 
-                                'assistant', 
-                                response_text, 
-                                user_id
+                            success, save_message = run_chat_operation(
+                                lambda chat_mgr, sid, mtype, content, uid: chat_mgr.add_message(sid, mtype, content, uid),
+                                st.session_state.current_chat_session_id, 'assistant', response_text, user_id
                             )
                             
                             if success:
@@ -413,11 +428,9 @@ if (st.session_state.current_chat_session_id and
                             # Save fallback response to database and session state
                             if st.session_state.current_chat_session_id:
                                 try:
-                                    success = chat_manager.add_message(
-                                        st.session_state.current_chat_session_id, 
-                                        'assistant', 
-                                        fallback_summary, 
-                                        user_id
+                                    success, _ = run_chat_operation(
+                                        lambda chat_mgr, sid, mtype, content, uid: chat_mgr.add_message(sid, mtype, content, uid),
+                                        st.session_state.current_chat_session_id, 'assistant', fallback_summary, user_id
                                     )
                                     
                                     if success:
@@ -436,11 +449,9 @@ if (st.session_state.current_chat_session_id and
                             # Save error message as assistant response
                             if st.session_state.current_chat_session_id:
                                 try:
-                                    chat_manager.add_message(
-                                        st.session_state.current_chat_session_id, 
-                                        'assistant', 
-                                        f"Error: {error_msg}", 
-                                        user_id
+                                    run_chat_operation(
+                                        lambda chat_mgr, sid, mtype, content, uid: chat_mgr.add_message(sid, mtype, content, uid),
+                                        st.session_state.current_chat_session_id, 'assistant', f"Error: {error_msg}", user_id
                                     )
                                 except Exception:
                                     pass  # Don't show error for error message saving
@@ -452,11 +463,9 @@ if (st.session_state.current_chat_session_id and
                         # Save error message as assistant response
                         if st.session_state.current_chat_session_id:
                             try:
-                                success = chat_manager.add_message(
-                                    st.session_state.current_chat_session_id, 
-                                    'assistant', 
-                                    error_msg, 
-                                    user_id
+                                success, _ = run_chat_operation(
+                                    lambda chat_mgr, sid, mtype, content, uid: chat_mgr.add_message(sid, mtype, content, uid),
+                                    st.session_state.current_chat_session_id, 'assistant', error_msg, user_id
                                 )
                                 
                                 if success:

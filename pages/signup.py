@@ -2,6 +2,7 @@ import streamlit as st
 import re
 import time
 from utils.auth_manager import AuthManager
+from utils.async_wrapper import run_auth_operation
 from utils.ui_feedback import UIFeedback, LoadingStates, ErrorMessages, SuccessMessages
 
 # Configure page
@@ -264,7 +265,10 @@ with st.container():
             try:
                 # Show loading state with proper feedback
                 with UIFeedback.loading_state(LoadingStates.AUTH_REGISTER):
-                    success, message = auth_manager.register_user(username, email, password)
+                    success, message = run_auth_operation(
+                        lambda auth_mgr, u, e, p: auth_mgr.register_user(u, e, p),
+                        username, email, password
+                    )
                 
                 if success:
                     st.session_state.signup_success = True
@@ -279,7 +283,10 @@ with st.container():
                     # Auto-login the user after successful registration
                     try:
                         with UIFeedback.loading_state("Logging you in..."):
-                            login_success, login_message = auth_manager.login_user_with_session(username, password)
+                            login_success, login_message = run_auth_operation(
+                                lambda auth_mgr, u, p: auth_mgr.login_user_with_session(u, p),
+                                username, password
+                            )
                         
                         if login_success:
                             st.switch_page("pages/chatbot.py")
