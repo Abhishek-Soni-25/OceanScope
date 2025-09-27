@@ -1,2 +1,5 @@
 streamlit
 streamlit-option-menu
+
+psycopg2-binary 
+python-dotenv
