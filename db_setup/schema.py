@@ -14,6 +14,67 @@ SCHEMA = {
             password VARCHAR(256) NOT NULL
         );
     """,
+
+    # -----------------------------
+    # ARGO TABLE
+    # -----------------------------
+    "argo_data": """
+        CREATE TABLE IF NOT EXISTS argo_data (
+            id SERIAL PRIMARY KEY,
+            platform_number VARCHAR(20),
+            cycle_number FLOAT,
+            juld TIMESTAMP,
+            latitude FLOAT,
+            longitude FLOAT,
+            pres FLOAT,
+            temp FLOAT,
+            psal FLOAT,
+            n_prof INT,
+            n_levels INT
+        );
+    """,
+
+    # -----------------------------
+    # BGC TABLE
+    # -----------------------------
+    "bgc_data": """
+        CREATE TABLE IF NOT EXISTS bgc_data (
+            id SERIAL PRIMARY KEY,
+            platform_number VARCHAR(20),
+            cycle_number FLOAT,
+            juld TIMESTAMP,
+            latitude FLOAT,
+            longitude FLOAT,
+            pres FLOAT,
+            temp FLOAT,
+            psal FLOAT,
+            pres_adjusted FLOAT,
+            temp_adjusted FLOAT,
+            psal_adjusted FLOAT,
+            ph_in_situ_total FLOAT,
+            doxy FLOAT,
+            nitrate FLOAT,
+            chla FLOAT,
+            bbp700 FLOAT,
+            n_prof INT,
+            n_levels INT
+        );
+    """,
+
+    # -----------------------------
+    # SST TABLE
+    # -----------------------------
+    "sst_data": """
+        CREATE TABLE IF NOT EXISTS sst_data (
+            id SERIAL PRIMARY KEY,
+            time TIMESTAMP,
+            latitude FLOAT,
+            longitude FLOAT,
+            sea_surface_temperature FLOAT,
+            wind_speed FLOAT,
+            sea_ice_fraction FLOAT
+        );
+    """
 }
 
 # -----------------------------
