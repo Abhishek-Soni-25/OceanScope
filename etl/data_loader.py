@@ -97,6 +97,12 @@ def load_nc_to_db(file_path: str, table_name: str, logger):
 
             df = pd.DataFrame(df_dict)
 
+            # Decode PLATFORM_NUMBER if it contains byte strings
+            if "platform_number" in df.columns:
+                df["platform_number"] = df["platform_number"].apply(
+                    lambda x: x.decode("utf-8").strip() if isinstance(x, (bytes, bytearray)) else x
+                )
+
         # 3. Process SST data
         elif table_name == "sst_data":
             # Select only required variables
